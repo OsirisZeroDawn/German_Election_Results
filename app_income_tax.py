@@ -354,7 +354,7 @@ st.plotly_chart(fig_multi, use_container_width=True)
 
 # ---- Vote Share (2021) by Income Bracket (with labels) ----
 
-st.subheader("Vote Share by Income Bracket")
+st.subheader("Vote Share (2021) by Income Bracket")
 
 # 1. Create 5 quantile bins of Tax_per_Taxpayer
 analysis_df["TaxBin"] = pd.qcut(
@@ -409,6 +409,84 @@ fig_bins.update_layout(
 st.plotly_chart(fig_bins, use_container_width=True)
 
 
+# ---- Vote Share (2025) by Income Bracket ----
+
+st.subheader("Vote Share (2025) by Income Bracket")
+
+# 1. Build a fresh analysis_df for 2025 (same pipeline as 2021, but different year)
+voting_2025_df, vote_count_col_2025, party_cols_2025 = load_voting_data(2025)
+
+tax_for_merge_2025 = income_tax_df.copy()
+vote_for_merge_2025 = voting_2025_df.copy()
+
+tax_for_merge_2025["Region_Code_num"] = pd.to_numeric(
+    tax_for_merge_2025["Region_Code"], errors="coerce"
+)
+vote_for_merge_2025["county_num"] = pd.to_numeric(
+    vote_for_merge_2025["county"], errors="coerce"
+)
+
+tax_for_merge_2025 = tax_for_merge_2025.dropna(subset=["Region_Code_num"])
+vote_for_merge_2025 = vote_for_merge_2025.dropna(subset=["county_num"])
+
+merged_2025 = tax_for_merge_2025.merge(
+    vote_for_merge_2025,
+    left_on="Region_Code_num",
+    right_on="county_num",
+    how="inner",
+)
+
+analysis_2025 = merged_2025[["Tax_per_Taxpayer"] + party_cols_2025].dropna()
+
+# 2. Create 5 quantile bins for 2025
+analysis_2025["TaxBin"] = pd.qcut(
+    analysis_2025["Tax_per_Taxpayer"],
+    5,
+    labels=False
+)
+
+# 3. Median tax per taxpayer per bin (x-axis labels)
+bin_labels_2025 = (
+    analysis_2025.groupby("TaxBin")["Tax_per_Taxpayer"]
+    .median()
+    .round(0)
+    .astype(int)
+)
+
+# 4. Mean vote share per party per bin
+mean_by_bin_2025 = analysis_2025.groupby("TaxBin")[party_cols_2025].mean()
+mean_by_bin_2025_pct = (mean_by_bin_2025 * 100).round(1)
+
+# 5. Build stacked bar chart
+fig_bins_2025 = go.Figure()
+
+for party in party_cols_2025:
+    fig_bins_2025.add_trace(go.Bar(
+        x=bin_labels_2025.index,
+        y=mean_by_bin_2025_pct[party],
+        name=party,
+        marker_color=party_colors.get(party, "#666666"),
+    ))
+
+fig_bins_2025.update_layout(
+    barmode="stack",
+    template="plotly_white",
+    height=500,
+    xaxis=dict(
+        title="Income Group (Median Tax per Taxpayer in €)",
+        tickmode="array",
+        tickvals=bin_labels_2025.index,
+        ticktext=[f"€{v:,.0f}" for v in bin_labels_2025],
+    ),
+    yaxis=dict(
+        title="Average Vote Share (%)",
+        ticksuffix="%",
+        range=[0, 100],
+    ),
+    legend_title="Party",
+)
+
+st.plotly_chart(fig_bins_2025, use_container_width=True)
 
 
 
