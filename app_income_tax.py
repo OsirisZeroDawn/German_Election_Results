@@ -51,13 +51,16 @@ def load_voting_data():
     if "cdu_csu" not in df.columns:
         df["cdu_csu"] = df["cdu"].fillna(0) + df["csu"].fillna(0)
 
+    vote_count_col = "valid_votes"
+
     # Top 6 parties we care about
     party_cols = ["cdu_csu", "spd", "gruene", "fdp", "linke_pds", "afd"]
 
     # Keep region code, year + those parties
-    df_top6 = df[["ags", "election_year"] + party_cols]
+    keep_cols = ["ags", "election_year", vote_count_col] + party_share_cols
+    df = df[keep_cols]
 
-    return df_top6
+    return df, vote_count_col, party_share_cols
 
 
 # ----------------- STREAMLIT UI -----------------
@@ -176,44 +179,45 @@ st.write("Rows:", voting_display.shape[0], " | Columns:", voting_display.shape[1
 st.dataframe(voting_display.head(50))
 
 
-# ---- Total votes by party (top 6) ----
+
+# ---- Total votes by party (top 6) in millions using Plotly GO ----
 
 st.subheader("Total Votes by Party (Bundestag 2021)")
 
-# Reload (or reuse) the top-6 voting data
-voting_top6_df = load_voting_data()
+voting_df, vote_count_col, party_share_cols = load_voting_data()
 
-# Columns in the dataframe
-party_cols = ["cdu_csu", "spd", "gruene", "fdp", "linke_pds", "afd"]
+# Map party share column -> pretty label + colour
+party_info = {
+    "cdu_csu": ("CDU/CSU", "#000000"),   # black
+    "spd": ("SPD", "#E3000F"),          # red
+    "gruene": ("Greens", "#1FA12E"),    # green
+    "fdp": ("FDP", "#FFED00"),          # yellow
+    "linke_pds": ("Die Linke", "#800000"),  # maroon
+    "afd": ("AfD", "#00B2FF"),          # light blue
+}
 
-# Pretty labels for the x-axis
-party_labels = ["CDU/CSU", "SPD", "Greens", "FDP", "Die Linke", "AfD"]
+# Compute total votes per party: sum(share * valid_votes)
+total_votes = []
+labels = []
+colors = []
 
-# Colours: CDU/CSU black, SPD red, Greens green, FDP yellow, I'm pretty sure these are the colors of the political parties?
-# Die Linke maroon, AfD light blue
-party_colors = [
-    "#000000",  # CDU/CSU - black
-    "#E3000F",  # SPD - red
-    "#1FA12E",  # Greens - green
-    "#FFED00",  # FDP - yellow
-    "#800000",  # Die Linke - maroon
-    "#00B2FF",  # AfD - light blue
-]
-
-# Sum votes over all municipalities for each party
-total_votes = voting_top6_df[party_cols].sum()
+for col in party_share_cols:
+    label, color = party_info[col]
+    votes_abs = (voting_df[col] * voting_df[vote_count_col]).sum()
+    total_votes.append(votes_abs)
+    labels.append(label)
+    colors.append(color)
 
 # Convert to millions
-votes_millions = (total_votes / 1_000_000).round(2)
+votes_millions = (np.array(total_votes) / 1_000_000).round(2)
 
-# Build Plotly GO bar chart
 fig_votes = go.Figure(
     data=[
         go.Bar(
-            x=party_labels,
-            y=votes_millions.values,
-            marker_color=party_colors,
-            text=votes_millions.values,
+            x=labels,
+            y=votes_millions,
+            marker_color=colors,
+            text=votes_millions,
             texttemplate="%{text:.2f} M",
             textposition="outside",
         )
@@ -229,3 +233,5 @@ fig_votes.update_layout(
 )
 
 st.plotly_chart(fig_votes, use_container_width=True)
+
+
