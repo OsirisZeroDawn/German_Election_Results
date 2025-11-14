@@ -2,7 +2,10 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
+import plotly.express as px
+
+
+# ----------------- DATA LOADING FUNCTIONS -----------------
 
 
 @st.cache_data
@@ -38,15 +41,22 @@ def load_income_tax_data():
 
 
 @st.cache_data
-def load_voting_data():
+def load_voting_data(year: int = 2021):
     """
-    Load the harmonised federal municipal election data and keep only
-    the top 6 parties, with CDU + CSU combined.
+    Load the harmonised federal municipal election data for a given year
+    and keep only the top 6 parties, with CDU + CSU combined.
     """
-    df = pd.read_csv("data/federal_muni_harm_21.csv")
 
-    # Focus on the 2021 Bundestag election
-    df = df[df["election_year"] == 2021].copy()
+    # Choose file based on year (21 vs 25)
+    if year == 2025:
+        filename = "data/federal_muni_harm_25.csv"
+    else:  # default / 2021
+        filename = "data/federal_muni_harm_21.csv"
+
+    df = pd.read_csv(filename)
+
+    # Focus on the requested election year
+    df = df[df["election_year"] == year].copy()
 
     # Ensure we have a combined CDU/CSU column
     if "cdu_csu" not in df.columns:
@@ -71,7 +81,7 @@ st.title("Income Tax & Political Impact")
 
 st.write(
     "This dataset contains income tax information by region in Germany, "
-    "and later will be compared with voting patterns."
+    "and compares it with voting patterns in federal elections."
 )
 
 # Load cleaned data once
@@ -171,7 +181,7 @@ st.plotly_chart(fig_bottom, use_container_width=True)
 
 st.subheader("Voting Background – Top 6 Parties (Bundestag 2021)")
 
-voting_top6_df, vote_count_col, party_cols = load_voting_data()
+voting_top6_df, vote_count_col, party_cols = load_voting_data(2021)
 
 # For display, show party shares as percentages
 voting_display = voting_top6_df.copy()
@@ -185,7 +195,7 @@ st.dataframe(voting_display.head(50))
 
 st.subheader("Total Votes by Party (Bundestag 2021)")
 
-voting_df, vote_count_col, party_cols = load_voting_data()
+voting_df, vote_count_col, party_cols = load_voting_data(2021)
 
 party_info = {
     "cdu_csu": ("CDU/CSU", "#000000"),      # black
@@ -234,30 +244,30 @@ fig_votes.update_layout(
 st.plotly_chart(fig_votes, use_container_width=True)
 
 
-# ---- MERGE TAX DATA WITH VOTING DATA ----
+# ---- MERGE TAX DATA WITH VOTING DATA (2021) ----
 
-st.subheader("Merged Dataset: Tax & Voting Information")
+st.subheader("Merged Dataset: Tax & Voting Information (2021)")
 
-voting_df, vote_count_col, party_cols = load_voting_data()
+voting_df_21, vote_count_col_21, party_cols_21 = load_voting_data(2021)
 
 # 1. Convert join keys to numeric safely
-tax_for_merge = income_tax_df.copy()
-vote_for_merge = voting_df.copy()
+tax_for_merge_21 = income_tax_df.copy()
+vote_for_merge_21 = voting_df_21.copy()
 
-tax_for_merge["Region_Code_num"] = pd.to_numeric(
-    tax_for_merge["Region_Code"], errors="coerce"
+tax_for_merge_21["Region_Code_num"] = pd.to_numeric(
+    tax_for_merge_21["Region_Code"], errors="coerce"
 )
-vote_for_merge["county_num"] = pd.to_numeric(
-    vote_for_merge["county"], errors="coerce"
+vote_for_merge_21["county_num"] = pd.to_numeric(
+    vote_for_merge_21["county"], errors="coerce"
 )
 
 # 2. Drop rows where conversion failed
-tax_for_merge = tax_for_merge.dropna(subset=["Region_Code_num"])
-vote_for_merge = vote_for_merge.dropna(subset=["county_num"])
+tax_for_merge_21 = tax_for_merge_21.dropna(subset=["Region_Code_num"])
+vote_for_merge_21 = vote_for_merge_21.dropna(subset=["county_num"])
 
 # 3. Merge on the cleaned numeric codes
-merged_df = tax_for_merge.merge(
-    vote_for_merge,
+merged_df = tax_for_merge_21.merge(
+    vote_for_merge_21,
     left_on="Region_Code_num",
     right_on="county_num",
     how="inner",
@@ -268,17 +278,17 @@ st.write("Merged columns:", merged_df.shape[1])
 st.dataframe(merged_df.head())
 
 
-# ---- CREATE ANALYSIS DATAFRAME ----
+# ---- CREATE ANALYSIS DATAFRAME (2021) ----
 
-analysis_cols = ["Tax_per_Taxpayer"] + party_cols
+analysis_cols = ["Tax_per_Taxpayer"] + party_cols_21
 analysis_df = merged_df[analysis_cols].dropna()
 
-st.subheader("Analysis DataFrame (Correlation Inputs)")
+st.subheader("Analysis DataFrame (Correlation Inputs, 2021)")
 st.dataframe(analysis_df.head())
 
 # ---- SCATTER PLOTS FOR EACH PARTY ----
 
-st.subheader("Tax per Taxpayer vs Party Vote Share")
+st.subheader("Tax per Taxpayer vs Party Vote Share (2021)")
 
 party_colors = {
     "cdu_csu": "#000000",
@@ -290,7 +300,7 @@ party_colors = {
 }
 
 # Dropdown to choose the party to visualize
-party_choice = st.selectbox("Choose a party:", party_cols)
+party_choice = st.selectbox("Choose a party:", party_cols_21)
 
 fig_scatter = go.Figure()
 
@@ -311,8 +321,6 @@ fig_scatter.update_layout(
 
 st.plotly_chart(fig_scatter, use_container_width=True)
 
-import plotly.express as px
-
 if st.checkbox("Show regression line"):
     fig_reg = px.scatter(
         analysis_df,
@@ -329,10 +337,10 @@ if st.checkbox("Show regression line"):
     )
     st.plotly_chart(fig_reg, use_container_width=True)
 
-st.subheader("All Parties: Tax-per-Taxpayer Relationship")
+st.subheader("All Parties: Tax-per-Taxpayer Relationship (2021)")
 
 rows = []
-for col in party_cols:
+for col in party_cols_21:
     rows.append(go.Scatter(
         x=analysis_df["Tax_per_Taxpayer"],
         y=analysis_df[col],
@@ -348,8 +356,6 @@ fig_multi.update_layout(
     yaxis_title="Vote Share",
 )
 st.plotly_chart(fig_multi, use_container_width=True)
-
-
 
 
 # ---- Vote Share (2021) by Income Bracket (with labels) ----
@@ -372,7 +378,7 @@ bin_labels = (
 )
 
 # 3. Mean vote share for each party in each bin
-mean_by_bin = analysis_df.groupby("TaxBin")[party_cols].mean()
+mean_by_bin = analysis_df.groupby("TaxBin")[party_cols_21].mean()
 
 # 4. Convert from fractions (0–1) to percentages
 mean_by_bin_percent = (mean_by_bin * 100).round(1)
@@ -380,7 +386,7 @@ mean_by_bin_percent = (mean_by_bin * 100).round(1)
 # 5. Build stacked bar chart with readable labels
 fig_bins = go.Figure()
 
-for party in party_cols:
+for party in party_cols_21:
     fig_bins.add_trace(go.Bar(
         x=bin_labels.index,                    # internal bin index 0–4
         y=mean_by_bin_percent[party],
@@ -489,12 +495,10 @@ fig_bins_2025.update_layout(
 st.plotly_chart(fig_bins_2025, use_container_width=True)
 
 
+# ---- Heatmap for 2021 (optional) ----
 
+st.subheader("Vote Share Heatmap by Tax Level (2021)")
 
-
-
-
-st.subheader("Vote Share Heatmap by Tax Level")
 fig_heat = px.imshow(
     mean_by_bin,
     labels=dict(x="Party", y="Income Bin", color="Vote Share"),
