@@ -51,16 +51,18 @@ def load_voting_data():
     if "cdu_csu" not in df.columns:
         df["cdu_csu"] = df["cdu"].fillna(0) + df["csu"].fillna(0)
 
+    # Column with absolute valid votes (check this name in your CSV)
     vote_count_col = "valid_votes"
 
-    # Top 6 parties we care about
+    # Top 6 parties we care about (vote shares, 0–1)
     party_cols = ["cdu_csu", "spd", "gruene", "fdp", "linke_pds", "afd"]
 
-    # Keep region code, year + those parties
-    keep_cols = ["ags", "election_year", vote_count_col] + party_share_cols
+    # Keep only the columns we need
+    keep_cols = ["ags", "election_year", vote_count_col] + party_cols
     df = df[keep_cols]
 
-    return df, vote_count_col, party_share_cols
+    # Return the dataframe and metadata
+    return df, vote_count_col, party_cols
 
 
 # ----------------- STREAMLIT UI -----------------
@@ -88,21 +90,23 @@ if st.checkbox("Show summary (describe)"):
 # ---- Summary: min / avg / max of Tax_per_Taxpayer ----
 if st.checkbox("Show Tax per Taxpayer Summary"):
 
-    summary_df = pd.DataFrame({
-        "Statistic": ["Minimum", "Average", "Maximum"],
-        "Tax_per_Taxpayer": [
-            income_tax_df["Tax_per_Taxpayer"].min(),
-            income_tax_df["Tax_per_Taxpayer"].mean(),
-            income_tax_df["Tax_per_Taxpayer"].max(),
-        ],
-    })
+    summary_df = pd.DataFrame(
+        {
+            "Statistic": ["Minimum", "Average", "Maximum"],
+            "Tax_per_Taxpayer": [
+                income_tax_df["Tax_per_Taxpayer"].min(),
+                income_tax_df["Tax_per_Taxpayer"].mean(),
+                income_tax_df["Tax_per_Taxpayer"].max(),
+            ],
+        }
+    )
 
     st.subheader("Tax per Taxpayer – Summary")
 
-# Bar chart: three bars side-by-side
+    # Bar chart: three bars side-by-side
     st.bar_chart(summary_df.set_index("Statistic"))
 
-# Optional: show exact values below, nicely formatted
+    # Optional: show exact values below, nicely formatted
     st.table(summary_df.style.format({"Tax_per_Taxpayer": "{:,.2f}"}))
 
 # ---- Top 10 / Bottom 10 districts using Plotly GO ----
@@ -163,15 +167,14 @@ fig_bottom.update_layout(
 st.plotly_chart(fig_bottom, use_container_width=True)
 
 
-
 # ---- Voting background: top 6 parties (CDU/CSU combined) ----
 
 st.subheader("Voting Background – Top 6 Parties (Bundestag 2021)")
 
-voting_top6_df = load_voting_data()
+# ✅ Unpack all three return values
+voting_top6_df, vote_count_col, party_cols = load_voting_data()
 
 # For display, show party shares as percentages
-party_cols = ["cdu_csu", "spd", "gruene", "fdp", "linke_pds", "afd"]
 voting_display = voting_top6_df.copy()
 voting_display[party_cols] = (voting_display[party_cols] * 100).round(2)
 
@@ -179,21 +182,21 @@ st.write("Rows:", voting_display.shape[0], " | Columns:", voting_display.shape[1
 st.dataframe(voting_display.head(50))
 
 
-
 # ---- Total votes by party (top 6) in millions using Plotly GO ----
 
 st.subheader("Total Votes by Party (Bundestag 2021)")
 
-voting_df, vote_count_col, party_share_cols = load_voting_data()
+# ✅ Reuse loader and unpack again
+voting_df, vote_count_col, party_cols = load_voting_data()
 
 # Map party share column -> pretty label + colour
 party_info = {
-    "cdu_csu": ("CDU/CSU", "#000000"),   # black
-    "spd": ("SPD", "#E3000F"),          # red
-    "gruene": ("Greens", "#1FA12E"),    # green
-    "fdp": ("FDP", "#FFED00"),          # yellow
-    "linke_pds": ("Die Linke", "#800000"),  # maroon
-    "afd": ("AfD", "#00B2FF"),          # light blue
+    "cdu_csu": ("CDU/CSU", "#000000"),      # black
+    "spd": ("SPD", "#E3000F"),             # red
+    "gruene": ("Greens", "#1FA12E"),       # green
+    "fdp": ("FDP", "#FFED00"),             # yellow
+    "linke_pds": ("Die Linke", "#800000"), # maroon
+    "afd": ("AfD", "#00B2FF"),             # light blue
 }
 
 # Compute total votes per party: sum(share * valid_votes)
@@ -201,7 +204,7 @@ total_votes = []
 labels = []
 colors = []
 
-for col in party_share_cols:
+for col in party_cols:
     label, color = party_info[col]
     votes_abs = (voting_df[col] * voting_df[vote_count_col]).sum()
     total_votes.append(votes_abs)
