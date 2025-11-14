@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import plotly.graph_objects as go
+import matplotlib.pyplot as plt
 
 
 @st.cache_data
@@ -57,11 +58,10 @@ def load_voting_data():
     # Top 6 parties we care about (vote shares, 0–1)
     party_cols = ["cdu_csu", "spd", "gruene", "fdp", "linke_pds", "afd"]
 
-    # Keep only the columns we need
-    keep_cols = ["ags", "election_year", vote_count_col] + party_cols
+    # Keep region code at municipal and county level + election/votes/parties
+    keep_cols = ["ags", "county", "election_year", vote_count_col] + party_cols
     df = df[keep_cols]
 
-    # Return the dataframe and metadata
     return df, vote_count_col, party_cols
 
 
@@ -171,7 +171,6 @@ st.plotly_chart(fig_bottom, use_container_width=True)
 
 st.subheader("Voting Background – Top 6 Parties (Bundestag 2021)")
 
-# ✅ Unpack all three return values
 voting_top6_df, vote_count_col, party_cols = load_voting_data()
 
 # For display, show party shares as percentages
@@ -186,10 +185,8 @@ st.dataframe(voting_display.head(50))
 
 st.subheader("Total Votes by Party (Bundestag 2021)")
 
-# ✅ Reuse loader and unpack again
 voting_df, vote_count_col, party_cols = load_voting_data()
 
-# Map party share column -> pretty label + colour
 party_info = {
     "cdu_csu": ("CDU/CSU", "#000000"),      # black
     "spd": ("SPD", "#E3000F"),             # red
@@ -211,7 +208,6 @@ for col in party_cols:
     labels.append(label)
     colors.append(color)
 
-# Convert to millions
 votes_millions = (np.array(total_votes) / 1_000_000).round(2)
 
 fig_votes = go.Figure(
@@ -238,3 +234,193 @@ fig_votes.update_layout(
 st.plotly_chart(fig_votes, use_container_width=True)
 
 
+# ---- MERGE TAX DATA WITH VOTING DATA ----
+
+st.subheader("Merged Dataset: Tax & Voting Information")
+
+voting_df, vote_count_col, party_cols = load_voting_data()
+
+# 1. Convert join keys to numeric safely
+tax_for_merge = income_tax_df.copy()
+vote_for_merge = voting_df.copy()
+
+tax_for_merge["Region_Code_num"] = pd.to_numeric(
+    tax_for_merge["Region_Code"], errors="coerce"
+)
+vote_for_merge["county_num"] = pd.to_numeric(
+    vote_for_merge["county"], errors="coerce"
+)
+
+# 2. Drop rows where conversion failed
+tax_for_merge = tax_for_merge.dropna(subset=["Region_Code_num"])
+vote_for_merge = vote_for_merge.dropna(subset=["county_num"])
+
+# 3. Merge on the cleaned numeric codes
+merged_df = tax_for_merge.merge(
+    vote_for_merge,
+    left_on="Region_Code_num",
+    right_on="county_num",
+    how="inner",
+)
+
+st.write("Merged rows:", merged_df.shape[0])
+st.write("Merged columns:", merged_df.shape[1])
+st.dataframe(merged_df.head())
+
+
+# ---- CREATE ANALYSIS DATAFRAME ----
+
+analysis_cols = ["Tax_per_Taxpayer"] + party_cols
+analysis_df = merged_df[analysis_cols].dropna()
+
+st.subheader("Analysis DataFrame (Correlation Inputs)")
+st.dataframe(analysis_df.head())
+
+# ---- SCATTER PLOTS FOR EACH PARTY ----
+
+st.subheader("Tax per Taxpayer vs Party Vote Share")
+
+party_colors = {
+    "cdu_csu": "#000000",
+    "spd": "#E3000F",
+    "gruene": "#1FA12E",
+    "fdp": "#FFED00",
+    "linke_pds": "#800000",
+    "afd": "#00B2FF",
+}
+
+# Dropdown to choose the party to visualize
+party_choice = st.selectbox("Choose a party:", party_cols)
+
+fig_scatter = go.Figure()
+
+fig_scatter.add_trace(go.Scatter(
+    x=analysis_df["Tax_per_Taxpayer"],
+    y=analysis_df[party_choice],
+    mode="markers",
+    marker=dict(color=party_colors[party_choice], size=8),
+    name=party_choice
+))
+
+fig_scatter.update_layout(
+    xaxis_title="Tax per Taxpayer (€)",
+    yaxis_title=f"{party_choice} Vote Share",
+    template="plotly_white",
+    height=500,
+)
+
+st.plotly_chart(fig_scatter, use_container_width=True)
+
+import plotly.express as px
+
+if st.checkbox("Show regression line"):
+    fig_reg = px.scatter(
+        analysis_df,
+        x="Tax_per_Taxpayer",
+        y=party_choice,
+        trendline="ols",
+        opacity=0.6,
+        hover_data=["Tax_per_Taxpayer"],
+    )
+    fig_reg.update_layout(
+        xaxis_title="Tax per Taxpayer (€)",
+        yaxis_title=f"{party_choice} Vote Share",
+        template="plotly_white"
+    )
+    st.plotly_chart(fig_reg, use_container_width=True)
+
+st.subheader("All Parties: Tax-per-Taxpayer Relationship")
+
+rows = []
+for col in party_cols:
+    rows.append(go.Scatter(
+        x=analysis_df["Tax_per_Taxpayer"],
+        y=analysis_df[col],
+        mode="markers",
+        name=col,
+        marker=dict(color=party_colors[col], size=6)
+    ))
+
+fig_multi = go.Figure(rows)
+fig_multi.update_layout(
+    template="plotly_white",
+    xaxis_title="Tax per Taxpayer (€)",
+    yaxis_title="Vote Share",
+)
+st.plotly_chart(fig_multi, use_container_width=True)
+
+
+
+
+# ---- Vote Share (2021) by Income Bracket (with labels) ----
+
+st.subheader("Vote Share by Income Bracket")
+
+# 1. Create 5 quantile bins of Tax_per_Taxpayer
+analysis_df["TaxBin"] = pd.qcut(
+    analysis_df["Tax_per_Taxpayer"],
+    5,
+    labels=False
+)
+
+# 2. Median tax per taxpayer for each bin → used as x-axis labels
+bin_labels = (
+    analysis_df.groupby("TaxBin")["Tax_per_Taxpayer"]
+    .median()
+    .round(0)
+    .astype(int)
+)
+
+# 3. Mean vote share for each party in each bin
+mean_by_bin = analysis_df.groupby("TaxBin")[party_cols].mean()
+
+# 4. Convert from fractions (0–1) to percentages
+mean_by_bin_percent = (mean_by_bin * 100).round(1)
+
+# 5. Build stacked bar chart with readable labels
+fig_bins = go.Figure()
+
+for party in party_cols:
+    fig_bins.add_trace(go.Bar(
+        x=bin_labels.index,                    # internal bin index 0–4
+        y=mean_by_bin_percent[party],
+        name=party,
+        marker_color=party_colors.get(party, "#666666"),
+    ))
+
+fig_bins.update_layout(
+    barmode="stack",
+    template="plotly_white",
+    height=500,
+    xaxis=dict(
+        title="Income Group (Median Tax per Taxpayer in €)",
+        tickmode="array",
+        tickvals=bin_labels.index,             # 0–4
+        ticktext=[f"€{v:,.0f}" for v in bin_labels],  # human labels e.g. €5,300
+    ),
+    yaxis=dict(
+        title="Average Vote Share (%)",
+        ticksuffix="%",
+        range=[0, 100],
+    ),
+    legend_title="Party",
+)
+
+st.plotly_chart(fig_bins, use_container_width=True)
+
+
+
+
+
+
+
+
+
+st.subheader("Vote Share Heatmap by Tax Level")
+fig_heat = px.imshow(
+    mean_by_bin,
+    labels=dict(x="Party", y="Income Bin", color="Vote Share"),
+    text_auto=True,
+    color_continuous_scale="RdBu"
+)
+st.plotly_chart(fig_heat, use_container_width=True)
