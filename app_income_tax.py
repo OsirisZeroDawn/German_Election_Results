@@ -36,6 +36,30 @@ def load_income_tax_data():
     return df
 
 
+@st.cache_data
+def load_voting_data():
+    """
+    Load the harmonised federal municipal election data and keep only
+    the top 6 parties, with CDU + CSU combined.
+    """
+    df = pd.read_csv("data/federal_muni_harm_21.csv")
+
+    # Focus on the 2021 Bundestag election
+    df = df[df["election_year"] == 2021].copy()
+
+    # Ensure we have a combined CDU/CSU column
+    if "cdu_csu" not in df.columns:
+        df["cdu_csu"] = df["cdu"].fillna(0) + df["csu"].fillna(0)
+
+    # Top 6 parties we care about
+    party_cols = ["cdu_csu", "spd", "gruene", "fdp", "linke_pds", "afd"]
+
+    # Keep region code, year + those parties
+    df_top6 = df[["ags", "election_year"] + party_cols]
+
+    return df_top6
+
+
 # ----------------- STREAMLIT UI -----------------
 
 st.title("Income Tax & Political Impact")
@@ -135,3 +159,73 @@ fig_bottom.update_layout(
 
 st.plotly_chart(fig_bottom, use_container_width=True)
 
+
+
+# ---- Voting background: top 6 parties (CDU/CSU combined) ----
+
+st.subheader("Voting Background – Top 6 Parties (Bundestag 2021)")
+
+voting_top6_df = load_voting_data()
+
+# For display, show party shares as percentages
+party_cols = ["cdu_csu", "spd", "gruene", "fdp", "linke_pds", "afd"]
+voting_display = voting_top6_df.copy()
+voting_display[party_cols] = (voting_display[party_cols] * 100).round(2)
+
+st.write("Rows:", voting_display.shape[0], " | Columns:", voting_display.shape[1])
+st.dataframe(voting_display.head(50))
+
+
+# ---- Total votes by party (top 6) ----
+
+st.subheader("Total Votes by Party (Bundestag 2021)")
+
+# Reload (or reuse) the top-6 voting data
+voting_top6_df = load_voting_data()
+
+# Columns in the dataframe
+party_cols = ["cdu_csu", "spd", "gruene", "fdp", "linke_pds", "afd"]
+
+# Pretty labels for the x-axis
+party_labels = ["CDU/CSU", "SPD", "Greens", "FDP", "Die Linke", "AfD"]
+
+# Colours: CDU/CSU black, SPD red, Greens green, FDP yellow, I'm pretty sure these are the colors of the political parties?
+# Die Linke maroon, AfD light blue
+party_colors = [
+    "#000000",  # CDU/CSU - black
+    "#E3000F",  # SPD - red
+    "#1FA12E",  # Greens - green
+    "#FFED00",  # FDP - yellow
+    "#800000",  # Die Linke - maroon
+    "#00B2FF",  # AfD - light blue
+]
+
+# Sum votes over all municipalities for each party
+total_votes = voting_top6_df[party_cols].sum()
+
+# Convert to millions
+votes_millions = (total_votes / 1_000_000).round(2)
+
+# Build Plotly GO bar chart
+fig_votes = go.Figure(
+    data=[
+        go.Bar(
+            x=party_labels,
+            y=votes_millions.values,
+            marker_color=party_colors,
+            text=votes_millions.values,
+            texttemplate="%{text:.2f} M",
+            textposition="outside",
+        )
+    ]
+)
+
+fig_votes.update_layout(
+    title="Total Votes by Party (Millions, Bundestag 2021)",
+    xaxis_title="Party",
+    yaxis_title="Votes (millions)",
+    template="plotly_white",
+    yaxis=dict(tickformat=".1f"),
+)
+
+st.plotly_chart(fig_votes, use_container_width=True)
